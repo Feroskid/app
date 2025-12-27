@@ -1,0 +1,191 @@
+{
+  "identity": {
+    "persona": "E1: The Anti-AI Designer",
+    "mission": "Create a survey platform that feels like a high-stakes fintech game, not a boring form filler.",
+    "principles": [
+      "Fusion over Imitation: Mix Fintech precision with Gaming excitement.",
+      "Emotion First: Every click should feel rewarding (haptic/visual feedback).",
+      "Content is King: Data is the hero, but make it look expensive.",
+      "Zoom In: Focus on the 'Balance' and 'Reward' moments.",
+      "Negative Space: Don't clutter the dashboard; let the numbers breathe."
+    ]
+  },
+  "typography": {
+    "fonts": {
+      "headings": {
+        "family": "Outfit",
+        "weights": ["500", "700", "900"],
+        "usage": "Headings, Big Numbers, Callouts",
+        "letterSpacing": "tracking-tight"
+      },
+      "body": {
+        "family": "Manrope",
+        "weights": ["400", "500", "600"],
+        "usage": "Paragraphs, UI Labels, Inputs",
+        "letterSpacing": "tracking-normal"
+      },
+      "mono": {
+        "family": "JetBrains Mono",
+        "weights": ["400"],
+        "usage": "Transaction IDs, API Keys, Code Snippets"
+      }
+    },
+    "instructions": "Import fonts via Google Fonts in index.css. Do NOT use Inter for headings."
+  },
+  "colors": {
+    "palette": {
+      "primary": {
+        "name": "Emerald Cash",
+        "hex": "#10B981",
+        "tailwind": "emerald-500",
+        "usage": "Primary Actions, Success States, Money Indicators"
+      },
+      "secondary": {
+        "name": "Electric Indigo",
+        "hex": "#6366F1",
+        "tailwind": "indigo-500",
+        "usage": "Accents, Brand Gradients, Active States"
+      },
+      "dark_bg": {
+        "name": "Void Blue",
+        "hex": "#020617",
+        "tailwind": "slate-950",
+        "usage": "Dark Mode Background"
+      },
+      "light_bg": {
+        "name": "Crisp Slate",
+        "hex": "#F8FAFC",
+        "tailwind": "slate-50",
+        "usage": "Light Mode Background"
+      },
+      "surface_dark": {
+        "name": "Glass Onyx",
+        "hex": "#0F172A",
+        "tailwind": "slate-900",
+        "usage": "Dark Mode Cards/Containers"
+      },
+      "surface_light": {
+        "name": "Pure White",
+        "hex": "#FFFFFF",
+        "tailwind": "white",
+        "usage": "Light Mode Cards/Containers"
+      }
+    },
+    "gradients": {
+      "hero_glow": "bg-gradient-to-tr from-emerald-500/20 via-indigo-500/20 to-transparent",
+      "text_gradient": "bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400"
+    },
+    "rules": [
+      "Never use pure black (#000000).",
+      "Dark mode cards must have a 1px border: border-white/10.",
+      "Light mode cards must have a subtle shadow: shadow-sm or shadow-md.",
+      "Text on dark backgrounds must be slate-200 or slate-400, never pure white unless it's a heading."
+    ]
+  },
+  "layout": {
+    "grid_system": {
+      "dashboard": {
+        "type": "Bento Grid (Mode B)",
+        "columns": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4",
+        "gap": "gap-4 or gap-6",
+        "rules": "Every pixel utilized. Use h-full on children."
+      },
+      "landing": {
+        "type": "Tetris Grid (Mode A)",
+        "columns": "grid-cols-1 md:grid-cols-8 lg:grid-cols-12",
+        "gap": "gap-8 to gap-12",
+        "rules": "Asymmetry is key. Leave breathing room."
+      }
+    },
+    "spacing": {
+      "scale": "2x standard. Use p-8 where you'd normally use p-4.",
+      "container_padding": "px-6 md:px-12 lg:px-24"
+    }
+  },
+  "components": {
+    "strategy": "Hybrid",
+    "shadcn": [
+      "Button",
+      "Input",
+      "Select",
+      "Dialog",
+      "DropdownMenu",
+      "Card (Customized)",
+      "Table",
+      "Tabs",
+      "Progress",
+      "Badge",
+      "Avatar",
+      "Sonner (Toast)"
+    ],
+    "custom": [
+      "HeroSection",
+      "FeatureGrid",
+      "PricingTable",
+      "StatsCard (Glassmorphic)",
+      "SurveyCard (Interactive)"
+    ],
+    "styling_rules": {
+      "buttons": "Rounded-full for primary actions. Sharp corners (rounded-md) for secondary.",
+      "cards": "Glassmorphism in Dark Mode (bg-slate-900/50 backdrop-blur-xl border-white/10). Clean & Solid in Light Mode (bg-white border-slate-200 shadow-sm).",
+      "inputs": "h-12 for better touch targets. bg-slate-50 (light) or bg-slate-900 (dark)."
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": {
+      "enabled": true,
+      "classes": "backdrop-blur-xl bg-white/70 dark:bg-slate-950/70 border border-white/20 dark:border-white/10"
+    },
+    "gradients": {
+      "enabled": true,
+      "usage": "Subtle background glows, text gradients for emphasis."
+    },
+    "motion": {
+      "library": "framer-motion",
+      "types": [
+        "Hover Lift: whileHover={{ y: -4 }}",
+        "List Stagger: variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}",
+        "Number Ticker: Use react-countup for balance updates."
+      ]
+    }
+  },
+  "assets": {
+    "images": {
+      "landing_hero": {
+        "url": "https://images.unsplash.com/photo-1673093774005-a5ee94ed98c4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwyfHxoYXBweSUyMHBlcnNvbiUyMGhvbGRpbmclMjBwaG9uZSUyMHdpbm5pbmd8ZW58MHx8fHwxNzY2ODQ5Nzk5fDA&ixlib=rb-4.1.0&q=85",
+        "alt": "Happy user winning rewards on phone",
+        "category": "Hero"
+      },
+      "social_proof": {
+        "url": "https://images.unsplash.com/photo-1670408378467-b8d8b461d49d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwxfHxoYXBweSUyMHBlcnNvbiUyMGhvbGRpbmclMjBwaG9uZSUyMHdpbm5pbmd8ZW58MHx8fHwxNzY2ODQ5Nzk5fDA&ixlib=rb-4.1.0&q=85",
+        "alt": "User smiling with results",
+        "category": "Testimonial"
+      },
+      "rewards_abstract": {
+        "url": "https://images.pexels.com/photos/8817679/pexels-photo-8817679.jpeg",
+        "alt": "Abstract 3D coins floating",
+        "category": "Wallet/Rewards"
+      },
+      "office_vibe": {
+        "url": "https://images.unsplash.com/photo-1760278041834-dc1021506a0b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzd8MHwxfHNlYXJjaHwyfHxtb2Rlcm4lMjBtaW5pbWFsaXN0JTIwb2ZmaWNlJTIwZGVzayUyMHNldHVwfGVufDB8fHx8MTc2Njc5NDY2N3ww&ixlib=rb-4.1.0&q=85",
+        "alt": "Modern minimalist desk",
+        "category": "About/Context"
+      }
+    },
+    "icons": {
+      "library": "lucide-react",
+      "style": "Stroke width 1.5px or 2px. Consistent sizing (w-5 h-5 or w-6 h-6)."
+    }
+  },
+  "universal_guidelines": [
+    "Do NOT use generic 'Inter' font for headings.",
+    "Do NOT use pure black backgrounds.",
+    "Do NOT center text by default; use left alignment for readability.",
+    "ALWAYS add data-testid to interactive elements.",
+    "ALWAYS use 'sonner' for toasts.",
+    "ALWAYS use 'lucide-react' for icons.",
+    "Ensure contrast ratios meet WCAG AA standards.",
+    "Use 'gap-4' minimum for flex/grid layouts to prevent crowding."
+  ],
+  "instructions_to_main_agent": "You are building a high-performance React app. Follow these guidelines strictly. Use the provided image URLs. Implement the 'Bento Grid' for the dashboard. Use 'Outfit' for all headings. Ensure the Dark/Light toggle works seamlessly using Tailwind's 'dark' class strategy."
+}
