@@ -5,19 +5,18 @@ import DashboardLayout from '../components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Progress } from '../components/ui/progress';
 import { api } from '../lib/api';
 import { toast } from 'sonner';
 import {
   Coins, TrendingUp, ClipboardCheck, Clock, ArrowRight,
-  Wallet, ChevronRight, Loader2
+  Wallet, ChevronRight, Loader2, Play
 } from 'lucide-react';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, refreshUser } = useAuth();
   const [stats, setStats] = useState(null);
-  const [surveys, setSurveys] = useState([]);
+  const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,25 +25,16 @@ export default function Dashboard() {
 
   const loadData = async () => {
     try {
-      const [statsData, surveysData] = await Promise.all([
+      const [statsData, providersData] = await Promise.all([
         api.getStats(),
-        api.getSurveys()
+        api.getSurveyProviders()
       ]);
       setStats(statsData);
-      setSurveys(surveysData.slice(0, 3));
+      setProviders(providersData.providers || []);
     } catch (error) {
       toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleStartSurvey = async (surveyId) => {
-    try {
-      await api.startSurvey(surveyId);
-      navigate('/surveys');
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to start survey');
     }
   };
 
@@ -81,9 +71,9 @@ export default function Dashboard() {
       color: 'cyan'
     },
     {
-      title: 'Pending Surveys',
-      value: stats?.pending_surveys || '0',
-      icon: Clock,
+      title: 'Est. USD Value',
+      value: `$${((stats?.balance || 0) / 1000).toFixed(2)}`,
+      icon: Wallet,
       color: 'amber'
     }
   ];
@@ -106,7 +96,7 @@ export default function Dashboard() {
             className="rounded-full bg-emerald-500 hover:bg-emerald-600"
             data-testid="browse-surveys-btn"
           >
-            Browse Surveys
+            Start Earning
             <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
         </div>
@@ -154,13 +144,13 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Quick Surveys */}
+        {/* Survey Providers & Recent Activity */}
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2">
             <Card className="glass-card border-slate-200 dark:border-white/10">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-lg font-semibold font-['Outfit']">
-                  Available Surveys
+                  Survey Providers
                 </CardTitle>
                 <Button
                   variant="ghost"
@@ -173,50 +163,46 @@ export default function Dashboard() {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-4">
-                {surveys.length === 0 ? (
+                {providers.length === 0 ? (
                   <p className="text-center text-slate-500 dark:text-slate-400 py-8">
-                    No surveys available right now
+                    Loading providers...
                   </p>
                 ) : (
-                  surveys.map((survey) => (
+                  providers.map((provider) => (
                     <div
-                      key={survey.survey_id}
+                      key={provider.id}
                       className="flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-white/5"
-                      data-testid={`survey-${survey.survey_id}`}
+                      data-testid={`provider-${provider.id}`}
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-medium text-slate-900 dark:text-white truncate">
-                            {survey.title}
-                          </h3>
-                          <Badge
-                            variant="outline"
-                            className={`text-xs ${
-                              survey.provider === 'inbrain'
-                                ? 'border-indigo-500/50 text-indigo-600 dark:text-indigo-400'
-                                : 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
-                            }`}
+                      <div className="flex items-center gap-4">
+                        <div 
+                          className="w-12 h-12 rounded-xl flex items-center justify-center"
+                          style={{ backgroundColor: `${provider.color}20` }}
+                        >
+                          <span 
+                            className="text-xl font-bold"
+                            style={{ color: provider.color }}
                           >
-                            {survey.provider === 'inbrain' ? 'Inbrain' : 'CPX'}
-                          </Badge>
+                            {provider.name.charAt(0)}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <Coins className="w-4 h-4 text-emerald-500" />
-                            {survey.points} pts
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" />
-                            {survey.estimated_time} min
-                          </span>
+                        <div>
+                          <h3 className="font-medium text-slate-900 dark:text-white">
+                            {provider.name}
+                          </h3>
+                          <p className="text-sm text-slate-500 dark:text-slate-400">
+                            {provider.description}
+                          </p>
                         </div>
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => handleStartSurvey(survey.survey_id)}
-                        className="rounded-full bg-emerald-500 hover:bg-emerald-600 ml-4"
-                        data-testid={`start-survey-${survey.survey_id}`}
+                        onClick={() => navigate(`/surveys?provider=${provider.id}`)}
+                        className="rounded-full"
+                        style={{ backgroundColor: provider.color }}
+                        data-testid={`start-${provider.id}`}
                       >
+                        <Play className="w-4 h-4 mr-1" />
                         Start
                       </Button>
                     </div>
@@ -234,38 +220,56 @@ export default function Dashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {stats?.recent_completions?.length === 0 ? (
-                <p className="text-center text-slate-500 dark:text-slate-400 py-8">
-                  Complete surveys to see your earnings here
-                </p>
-              ) : (
-                stats?.recent_completions?.map((completion, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-white/5 last:border-0"
+              {!stats?.recent_completions || stats.recent_completions.length === 0 ? (
+                <div className="text-center py-8">
+                  <ClipboardCheck className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">
+                    Complete surveys to see your earnings here
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => navigate('/surveys')}
                   >
-                    <div>
-                      <p className="text-sm font-medium text-slate-900 dark:text-white truncate max-w-[150px]">
-                        {completion.title}
-                      </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {new Date(completion.completed_at).toLocaleDateString()}
-                      </p>
+                    Start First Survey
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {stats.recent_completions.map((completion, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-white/5 last:border-0"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                          <Coins className="w-4 h-4 text-emerald-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-slate-900 dark:text-white truncate max-w-[120px]">
+                            {completion.offer_name || completion.provider}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {new Date(completion.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                        +{completion.points}
+                      </span>
                     </div>
-                    <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                      +{completion.points_earned}
-                    </span>
-                  </div>
-                ))
+                  ))}
+                  <Button
+                    variant="ghost"
+                    className="w-full text-emerald-600 dark:text-emerald-400"
+                    onClick={() => navigate('/history')}
+                  >
+                    View Full History
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </>
               )}
-              <Button
-                variant="ghost"
-                className="w-full text-emerald-600 dark:text-emerald-400"
-                onClick={() => navigate('/history')}
-              >
-                View Full History
-                <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
             </CardContent>
           </Card>
         </div>
