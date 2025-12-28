@@ -1,5 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, Query
 from fastapi.security import HTTPBearer
+from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -13,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
 import httpx
+import hashlib
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -26,6 +28,31 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ.get('JWT_SECRET', 'survey-portal-secret-key-2024')
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24 * 7  # 7 days
+
+# ========================= SURVEY PROVIDER CONFIGURATIONS =========================
+
+# Inbrain Configuration
+INBRAIN_CONFIG = {
+    "callback_secret": os.environ.get("INBRAIN_CALLBACK_SECRET", "MjNiMjdmNTgtODY3YS00NDljLWJlYmItY2YyMjE0OTFlYmQ2"),
+    "placement_id": "3a0973b1-e1ca-46de-ab80-504cf53331c4",
+    "survey_wall_base": "https://www.surveyb.in/configuration?params=Um5odTdRZXl1d1oyQUt3Q0RiVmN5QUZHeGxaVDhYdkhUQ0pMTlNQTlRzelJPNlBqME9WU29obmZwOTk2eURNc05CRWMySk1ETy8wd2dCdXk5amhpYkxWM2M5aW9XWnd6T3ZYbXFYdFgvbUdiWlJlY1MrVG9JOVlBai9Da3pSMjlXbm1JQktqeVBNa2Y0UE1uQlBlK1VFVDBaTHJ6THg3RlNQdGJNVGJqVVRhN3FqSzNSaHdJb2VQTGNXR2tZdWRSRTY1ZkcrZ3NjNTR4M21TWE1UaDlMdz09"
+}
+
+# CPX Research Configuration
+CPX_CONFIG = {
+    "app_id": "19171",
+    "secure_hash": os.environ.get("CPX_SECURE_HASH", ""),  # Set this in .env
+    "iframe_base": "https://offers.cpx-research.com/index.php"
+}
+
+# Admantium Configuration
+ADMANTIUM_CONFIG = {
+    "api_key": "65a590d817264916626634",
+    "secret": os.environ.get("ADMANTIUM_SECRET", "6c97d28091"),
+    "api_secret": "067fd20198",
+    "iframe_base": "https://wall.admantium.net/wall",
+    "whitelist_ip": "3.22.177.178"
+}
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -62,18 +89,6 @@ class TokenResponse(BaseModel):
     token: str
     user: UserResponse
 
-class SurveyResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    survey_id: str
-    provider: str
-    title: str
-    description: str
-    points: int
-    estimated_time: int
-    category: str
-    difficulty: str
-    status: str = "available"
-
 class SurveyCompletionResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     completion_id: str
@@ -109,11 +124,18 @@ class LeaderboardEntry(BaseModel):
     total_earned: int
     surveys_completed: int
 
-class StartSurveyRequest(BaseModel):
-    survey_id: str
-
-class CompleteSurveyRequest(BaseModel):
-    survey_id: str
+class TransactionRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    transaction_id: str
+    user_id: str
+    provider: str
+    reward_type: str  # "credit" or "reversal"
+    points: int
+    offer_id: Optional[str] = None
+    offer_name: Optional[str] = None
+    status: str
+    created_at: datetime
+    raw_data: Optional[dict] = None
 
 # ========================= AUTH HELPERS =========================
 
@@ -177,7 +199,6 @@ async def get_current_user(request: Request) -> dict:
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(data: UserRegister):
-    # Check if user exists
     existing = await db.users.find_one({"email": data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -222,10 +243,9 @@ async def process_google_session(request: Request, response: Response):
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id required")
     
-    # Exchange session_id with Emergent Auth
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as http_client:
         try:
-            auth_response = await client.get(
+            auth_response = await http_client.get(
                 "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
                 headers={"X-Session-ID": session_id}
             )
@@ -237,11 +257,9 @@ async def process_google_session(request: Request, response: Response):
             logger.error(f"Auth error: {e}")
             raise HTTPException(status_code=401, detail="Authentication failed")
     
-    # Find or create user
     user = await db.users.find_one({"email": auth_data["email"]}, {"_id": 0})
     
     if user:
-        # Update existing user
         await db.users.update_one(
             {"email": auth_data["email"]},
             {"$set": {"name": auth_data["name"], "picture": auth_data.get("picture")}}
@@ -249,7 +267,6 @@ async def process_google_session(request: Request, response: Response):
         user["name"] = auth_data["name"]
         user["picture"] = auth_data.get("picture")
     else:
-        # Create new user
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         user = {
             "user_id": user_id,
@@ -264,7 +281,6 @@ async def process_google_session(request: Request, response: Response):
         }
         await db.users.insert_one(user)
     
-    # Store session
     session_token = auth_data.get("session_token", f"sess_{uuid.uuid4().hex}")
     await db.user_sessions.insert_one({
         "user_id": user["user_id"],
@@ -273,7 +289,6 @@ async def process_google_session(request: Request, response: Response):
         "created_at": datetime.now(timezone.utc)
     })
     
-    # Set cookie
     response.set_cookie(
         key="session_token",
         value=session_token,
@@ -300,148 +315,458 @@ async def logout(request: Request, response: Response):
     response.delete_cookie("session_token", path="/", secure=True, samesite="none")
     return {"message": "Logged out"}
 
-# ========================= MOCK SURVEY DATA =========================
+# ========================= SURVEY PROVIDER IFRAME URLs =========================
 
-MOCK_SURVEYS = [
-    # Inbrain Surveys
-    {"survey_id": "inbrain_001", "provider": "inbrain", "title": "Consumer Shopping Habits", "description": "Share your shopping preferences and habits", "points": 150, "estimated_time": 10, "category": "Shopping", "difficulty": "Easy"},
-    {"survey_id": "inbrain_002", "provider": "inbrain", "title": "Technology Usage Survey", "description": "Tell us about your tech devices and usage", "points": 200, "estimated_time": 15, "category": "Technology", "difficulty": "Medium"},
-    {"survey_id": "inbrain_003", "provider": "inbrain", "title": "Health & Wellness Check", "description": "Share your health and wellness routines", "points": 300, "estimated_time": 20, "category": "Health", "difficulty": "Medium"},
-    {"survey_id": "inbrain_004", "provider": "inbrain", "title": "Entertainment Preferences", "description": "What do you watch, listen to, and play?", "points": 100, "estimated_time": 8, "category": "Entertainment", "difficulty": "Easy"},
-    {"survey_id": "inbrain_005", "provider": "inbrain", "title": "Financial Planning Survey", "description": "Your approach to saving and investing", "points": 400, "estimated_time": 25, "category": "Finance", "difficulty": "Hard"},
-    # CPX Research Surveys
-    {"survey_id": "cpx_001", "provider": "cpx_research", "title": "Social Media Usage", "description": "How do you use social media platforms?", "points": 175, "estimated_time": 12, "category": "Social", "difficulty": "Easy"},
-    {"survey_id": "cpx_002", "provider": "cpx_research", "title": "Travel Preferences", "description": "Share your travel experiences and plans", "points": 250, "estimated_time": 18, "category": "Travel", "difficulty": "Medium"},
-    {"survey_id": "cpx_003", "provider": "cpx_research", "title": "Food & Dining Habits", "description": "Your restaurant and cooking preferences", "points": 125, "estimated_time": 10, "category": "Food", "difficulty": "Easy"},
-    {"survey_id": "cpx_004", "provider": "cpx_research", "title": "Automotive Survey", "description": "Your vehicle preferences and habits", "points": 350, "estimated_time": 22, "category": "Automotive", "difficulty": "Hard"},
-    {"survey_id": "cpx_005", "provider": "cpx_research", "title": "Home Improvement", "description": "DIY projects and home renovation plans", "points": 275, "estimated_time": 16, "category": "Home", "difficulty": "Medium"},
-]
-
-# ========================= SURVEY ENDPOINTS =========================
-
-@api_router.get("/surveys", response_model=List[SurveyResponse])
-async def get_available_surveys(
-    provider: Optional[str] = None,
-    category: Optional[str] = None,
-    user: dict = Depends(get_current_user)
-):
-    """Get available surveys (mocked from Inbrain & CPX Research)"""
-    # Get user's completed surveys
-    completed = await db.survey_completions.find(
-        {"user_id": user["user_id"]}, {"survey_id": 1, "_id": 0}
-    ).to_list(1000)
-    completed_ids = {c["survey_id"] for c in completed}
+@api_router.get("/surveys/providers")
+async def get_survey_providers(user: dict = Depends(get_current_user)):
+    """Get survey wall iframe URLs for all providers"""
+    user_id = user["user_id"]
     
-    # Get user's pending surveys
-    pending = await db.pending_surveys.find(
-        {"user_id": user["user_id"]}, {"survey_id": 1, "_id": 0}
-    ).to_list(100)
-    pending_ids = {p["survey_id"] for p in pending}
-    
-    surveys = []
-    for s in MOCK_SURVEYS:
-        if s["survey_id"] in completed_ids:
-            continue
-        if provider and s["provider"] != provider:
-            continue
-        if category and s["category"] != category:
-            continue
-        
-        status = "in_progress" if s["survey_id"] in pending_ids else "available"
-        surveys.append(SurveyResponse(**s, status=status))
-    
-    return surveys
-
-@api_router.post("/surveys/start", response_model=SurveyResponse)
-async def start_survey(data: StartSurveyRequest, user: dict = Depends(get_current_user)):
-    """Start a survey (mark as in-progress)"""
-    survey = next((s for s in MOCK_SURVEYS if s["survey_id"] == data.survey_id), None)
-    if not survey:
-        raise HTTPException(status_code=404, detail="Survey not found")
-    
-    # Check if already completed
-    completed = await db.survey_completions.find_one(
-        {"user_id": user["user_id"], "survey_id": data.survey_id}, {"_id": 0}
-    )
-    if completed:
-        raise HTTPException(status_code=400, detail="Survey already completed")
-    
-    # Check if already in progress
-    pending = await db.pending_surveys.find_one(
-        {"user_id": user["user_id"], "survey_id": data.survey_id}, {"_id": 0}
-    )
-    if not pending:
-        await db.pending_surveys.insert_one({
-            "user_id": user["user_id"],
-            "survey_id": data.survey_id,
-            "started_at": datetime.now(timezone.utc)
-        })
-        await db.users.update_one(
-            {"user_id": user["user_id"]},
-            {"$inc": {"pending_surveys": 1}}
-        )
-    
-    return SurveyResponse(**survey, status="in_progress")
-
-@api_router.post("/surveys/complete", response_model=SurveyCompletionResponse)
-async def complete_survey(data: CompleteSurveyRequest, user: dict = Depends(get_current_user)):
-    """Complete a survey and earn points (auto-updates balance)"""
-    survey = next((s for s in MOCK_SURVEYS if s["survey_id"] == data.survey_id), None)
-    if not survey:
-        raise HTTPException(status_code=404, detail="Survey not found")
-    
-    # Check if already completed
-    existing = await db.survey_completions.find_one(
-        {"user_id": user["user_id"], "survey_id": data.survey_id}, {"_id": 0}
-    )
-    if existing:
-        raise HTTPException(status_code=400, detail="Survey already completed")
-    
-    completion_id = f"comp_{uuid.uuid4().hex[:12]}"
-    completion = {
-        "completion_id": completion_id,
-        "survey_id": survey["survey_id"],
-        "user_id": user["user_id"],
-        "provider": survey["provider"],
-        "title": survey["title"],
-        "points_earned": survey["points"],
-        "completed_at": datetime.now(timezone.utc),
-        "status": "completed"
-    }
-    await db.survey_completions.insert_one(completion)
-    
-    # Remove from pending
-    await db.pending_surveys.delete_one({"user_id": user["user_id"], "survey_id": data.survey_id})
-    
-    # AUTO-UPDATE USER BALANCE
-    await db.users.update_one(
-        {"user_id": user["user_id"]},
-        {
-            "$inc": {
-                "balance": survey["points"],
-                "total_earned": survey["points"],
-                "surveys_completed": 1,
-                "pending_surveys": -1
+    return {
+        "providers": [
+            {
+                "id": "inbrain",
+                "name": "Inbrain",
+                "description": "Premium surveys from top brands",
+                "iframe_url": f"{INBRAIN_CONFIG['survey_wall_base']}&app_uid={user_id}",
+                "color": "#6366F1"
+            },
+            {
+                "id": "cpx_research",
+                "name": "CPX Research",
+                "description": "Global research surveys",
+                "iframe_url": f"{CPX_CONFIG['iframe_base']}?app_id={CPX_CONFIG['app_id']}&ext_user_id={user_id}",
+                "color": "#10B981"
+            },
+            {
+                "id": "admantium",
+                "name": "Admantium",
+                "description": "Offers and surveys",
+                "iframe_url": f"{ADMANTIUM_CONFIG['iframe_base']}?apiKey={ADMANTIUM_CONFIG['api_key']}&userId={user_id}",
+                "color": "#F59E0B"
             }
-        }
-    )
-    
-    logger.info(f"User {user['user_id']} completed survey {survey['survey_id']} and earned {survey['points']} points")
-    
-    return SurveyCompletionResponse(**completion)
+        ],
+        "user_id": user_id
+    }
 
-@api_router.get("/surveys/history", response_model=List[SurveyCompletionResponse])
+# ========================= POSTBACK ENDPOINTS =========================
+
+@api_router.post("/postback/inbrain/success", response_class=PlainTextResponse)
+async def inbrain_success_callback(request: Request):
+    """
+    Inbrain Success Callback - Called when user completes a survey
+    Validates signature: MD5(PanelistId + RewardId + CallbackSecret)
+    """
+    try:
+        data = await request.json()
+        logger.info(f"Inbrain success callback received: {data}")
+        
+        # Extract fields
+        sig = data.get("Sig", "")
+        panelist_id = data.get("PanelistId", "")  # This is our user_id
+        reward_id = data.get("RewardId", "")
+        reward = int(data.get("Reward", 0))
+        reward_type = data.get("RewardType", "")
+        revenue_amount = float(data.get("RevenueAmount", 0))
+        is_test = data.get("IsTest", False)
+        session_id = data.get("SessionId", "")
+        
+        # Validate signature
+        expected_sig = hashlib.md5(
+            f"{panelist_id}{reward_id}{INBRAIN_CONFIG['callback_secret']}".encode()
+        ).hexdigest()
+        
+        if sig.lower() != expected_sig.lower():
+            logger.warning(f"Inbrain signature mismatch: expected {expected_sig}, got {sig}")
+            return PlainTextResponse("SIGNATURE_MISMATCH", status_code=400)
+        
+        # Check for duplicate transaction
+        existing = await db.transactions.find_one({"transaction_id": reward_id}, {"_id": 0})
+        if existing:
+            logger.info(f"Duplicate Inbrain transaction: {reward_id}")
+            return PlainTextResponse("OK")
+        
+        # Find user
+        user = await db.users.find_one({"user_id": panelist_id}, {"_id": 0})
+        if not user:
+            logger.warning(f"Inbrain callback: User not found: {panelist_id}")
+            return PlainTextResponse("USER_NOT_FOUND", status_code=404)
+        
+        # Credit user (skip if test and reward is 0)
+        if reward > 0:
+            await db.users.update_one(
+                {"user_id": panelist_id},
+                {
+                    "$inc": {
+                        "balance": reward,
+                        "total_earned": reward,
+                        "surveys_completed": 1
+                    }
+                }
+            )
+            
+            # Record transaction
+            transaction = {
+                "transaction_id": reward_id,
+                "user_id": panelist_id,
+                "provider": "inbrain",
+                "reward_type": "credit",
+                "points": reward,
+                "offer_name": reward_type,
+                "revenue_usd": revenue_amount,
+                "status": "completed",
+                "is_test": is_test,
+                "created_at": datetime.now(timezone.utc),
+                "raw_data": data
+            }
+            await db.transactions.insert_one(transaction)
+            
+            logger.info(f"Inbrain: Credited {reward} points to user {panelist_id}")
+        
+        return PlainTextResponse("OK")
+        
+    except Exception as e:
+        logger.error(f"Inbrain success callback error: {e}")
+        return PlainTextResponse("ERROR", status_code=500)
+
+@api_router.post("/postback/inbrain/failure", response_class=PlainTextResponse)
+async def inbrain_failure_callback(request: Request):
+    """
+    Inbrain Failure Callback - Called when user is disqualified from a survey
+    May still contain reward for disqualification if configured
+    """
+    try:
+        data = await request.json()
+        logger.info(f"Inbrain failure callback received: {data}")
+        
+        sig = data.get("Sig", "")
+        panelist_id = data.get("PanelistId", "")
+        reward_id = data.get("RewardId", "")
+        reward = int(data.get("Reward", 0))
+        reward_type = data.get("RewardType", "")
+        
+        # Validate signature
+        expected_sig = hashlib.md5(
+            f"{panelist_id}{reward_id}{INBRAIN_CONFIG['callback_secret']}".encode()
+        ).hexdigest()
+        
+        if sig.lower() != expected_sig.lower():
+            logger.warning(f"Inbrain failure sig mismatch")
+            return PlainTextResponse("SIGNATURE_MISMATCH", status_code=400)
+        
+        # Check for duplicate
+        existing = await db.transactions.find_one({"transaction_id": reward_id}, {"_id": 0})
+        if existing:
+            return PlainTextResponse("OK")
+        
+        # If there's a disqualification reward, credit it
+        if reward > 0:
+            user = await db.users.find_one({"user_id": panelist_id}, {"_id": 0})
+            if user:
+                await db.users.update_one(
+                    {"user_id": panelist_id},
+                    {"$inc": {"balance": reward, "total_earned": reward}}
+                )
+        
+        # Record transaction
+        transaction = {
+            "transaction_id": reward_id,
+            "user_id": panelist_id,
+            "provider": "inbrain",
+            "reward_type": "disqualification",
+            "points": reward,
+            "offer_name": reward_type,
+            "status": "disqualified",
+            "created_at": datetime.now(timezone.utc),
+            "raw_data": data
+        }
+        await db.transactions.insert_one(transaction)
+        
+        return PlainTextResponse("OK")
+        
+    except Exception as e:
+        logger.error(f"Inbrain failure callback error: {e}")
+        return PlainTextResponse("ERROR", status_code=500)
+
+@api_router.get("/postback/cpx", response_class=PlainTextResponse)
+async def cpx_research_callback(
+    request: Request,
+    status: int = Query(...),
+    trans_id: str = Query(...),
+    user_id: str = Query(...),
+    amount_local: float = Query(default=0),
+    amount_usd: float = Query(default=0),
+    offer_id: str = Query(default=""),
+    hash: str = Query(default="", alias="secure_hash"),
+    type: str = Query(default="complete"),
+    ip_click: str = Query(default=""),
+    subid: str = Query(default=""),
+    subid_2: str = Query(default="")
+):
+    """
+    CPX Research Postback URL
+    Status: 1 = completed, 2 = canceled/reversed
+    Hash validation: MD5(trans_id + app_secure_hash)
+    """
+    try:
+        logger.info(f"CPX callback: status={status}, trans_id={trans_id}, user_id={user_id}, amount={amount_local}")
+        
+        # Validate hash if secure_hash is configured
+        if CPX_CONFIG["secure_hash"] and hash:
+            expected_hash = hashlib.md5(
+                f"{trans_id}-{CPX_CONFIG['secure_hash']}".encode()
+            ).hexdigest()
+            if hash.lower() != expected_hash.lower():
+                logger.warning(f"CPX hash mismatch")
+                return PlainTextResponse("0")
+        
+        # Check for duplicate
+        existing = await db.transactions.find_one({"transaction_id": trans_id}, {"_id": 0})
+        
+        # Find user
+        user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        if not user:
+            logger.warning(f"CPX callback: User not found: {user_id}")
+            return PlainTextResponse("0")
+        
+        points = int(amount_local)
+        
+        if status == 1:  # Completed
+            if existing:
+                logger.info(f"Duplicate CPX completion: {trans_id}")
+                return PlainTextResponse("1")
+            
+            # Credit user
+            await db.users.update_one(
+                {"user_id": user_id},
+                {
+                    "$inc": {
+                        "balance": points,
+                        "total_earned": points,
+                        "surveys_completed": 1
+                    }
+                }
+            )
+            
+            transaction = {
+                "transaction_id": trans_id,
+                "user_id": user_id,
+                "provider": "cpx_research",
+                "reward_type": "credit",
+                "points": points,
+                "offer_id": offer_id,
+                "amount_usd": amount_usd,
+                "status": "completed",
+                "type": type,
+                "ip_click": ip_click,
+                "created_at": datetime.now(timezone.utc)
+            }
+            await db.transactions.insert_one(transaction)
+            logger.info(f"CPX: Credited {points} points to user {user_id}")
+            
+        elif status == 2:  # Canceled/Reversed (Fraud)
+            if existing and existing.get("status") == "reversed":
+                return PlainTextResponse("1")
+            
+            # Reverse/deduct points
+            await db.users.update_one(
+                {"user_id": user_id},
+                {
+                    "$inc": {
+                        "balance": -points,
+                        "total_earned": -points,
+                        "surveys_completed": -1
+                    }
+                }
+            )
+            
+            # Update existing transaction or create reversal record
+            if existing:
+                await db.transactions.update_one(
+                    {"transaction_id": trans_id},
+                    {"$set": {"status": "reversed", "reversed_at": datetime.now(timezone.utc)}}
+                )
+            else:
+                transaction = {
+                    "transaction_id": trans_id,
+                    "user_id": user_id,
+                    "provider": "cpx_research",
+                    "reward_type": "reversal",
+                    "points": -points,
+                    "offer_id": offer_id,
+                    "status": "reversed",
+                    "created_at": datetime.now(timezone.utc)
+                }
+                await db.transactions.insert_one(transaction)
+            
+            logger.info(f"CPX: Reversed {points} points from user {user_id} (fraud)")
+        
+        return PlainTextResponse("1")
+        
+    except Exception as e:
+        logger.error(f"CPX callback error: {e}")
+        return PlainTextResponse("0")
+
+@api_router.get("/postback/admantium", response_class=PlainTextResponse)
+async def admantium_callback(
+    request: Request,
+    user_id: str = Query(...),
+    reward: int = Query(...),
+    status: str = Query(...),  # "credited" or "rejected"
+    transaction_id: str = Query(...),
+    offer_id: str = Query(default=""),
+    offer_name: str = Query(default=""),
+    signature: str = Query(default=""),
+    ip: str = Query(default=""),
+    payout: float = Query(default=0),
+    aff_sub: str = Query(default=""),
+    aff_sub2: str = Query(default=""),
+    goal_id: str = Query(default=""),
+    goal_name: str = Query(default="")
+):
+    """
+    Admantium Postback URL
+    Status: "credited" = add points, "rejected" = subtract points (fraud/cancellation)
+    Signature validation: MD5(user_id + transaction_id + reward + secret)
+    Whitelist IP: 3.22.177.178
+    """
+    try:
+        logger.info(f"Admantium callback: status={status}, trans_id={transaction_id}, user_id={user_id}, reward={reward}")
+        
+        # IP whitelist check (optional but recommended)
+        client_ip = request.client.host if request.client else ""
+        # Note: In production behind proxy, check X-Forwarded-For header
+        forwarded_for = request.headers.get("X-Forwarded-For", "")
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[0].strip()
+        
+        # Validate signature
+        expected_sig = hashlib.md5(
+            f"{user_id}{transaction_id}{reward}{ADMANTIUM_CONFIG['secret']}".encode()
+        ).hexdigest()
+        
+        if signature.lower() != expected_sig.lower():
+            logger.warning(f"Admantium signature mismatch: expected {expected_sig}, got {signature}")
+            return PlainTextResponse("ERROR: Signature doesn't match")
+        
+        # Find user
+        user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+        if not user:
+            logger.warning(f"Admantium callback: User not found: {user_id}")
+            return PlainTextResponse("ERROR: User not found")
+        
+        # Check for duplicate
+        existing = await db.transactions.find_one({"transaction_id": transaction_id}, {"_id": 0})
+        
+        if status == "credited":
+            if existing and existing.get("status") == "completed":
+                return PlainTextResponse("OK")
+            
+            # Credit user
+            await db.users.update_one(
+                {"user_id": user_id},
+                {
+                    "$inc": {
+                        "balance": reward,
+                        "total_earned": reward,
+                        "surveys_completed": 1
+                    }
+                }
+            )
+            
+            transaction = {
+                "transaction_id": transaction_id,
+                "user_id": user_id,
+                "provider": "admantium",
+                "reward_type": "credit",
+                "points": reward,
+                "offer_id": offer_id,
+                "offer_name": offer_name,
+                "payout_usd": payout,
+                "goal_id": goal_id,
+                "goal_name": goal_name,
+                "status": "completed",
+                "ip": ip,
+                "created_at": datetime.now(timezone.utc)
+            }
+            await db.transactions.insert_one(transaction)
+            logger.info(f"Admantium: Credited {reward} points to user {user_id}")
+            
+        elif status == "rejected":
+            # Rejection/fraud - deduct points
+            if existing and existing.get("status") == "rejected":
+                return PlainTextResponse("OK")
+            
+            # Note: reward will be negative for rejections according to docs
+            points_to_deduct = abs(reward)
+            
+            await db.users.update_one(
+                {"user_id": user_id},
+                {
+                    "$inc": {
+                        "balance": -points_to_deduct,
+                        "total_earned": -points_to_deduct,
+                        "surveys_completed": -1
+                    }
+                }
+            )
+            
+            if existing:
+                await db.transactions.update_one(
+                    {"transaction_id": transaction_id},
+                    {"$set": {"status": "rejected", "rejected_at": datetime.now(timezone.utc)}}
+                )
+            else:
+                transaction = {
+                    "transaction_id": transaction_id,
+                    "user_id": user_id,
+                    "provider": "admantium",
+                    "reward_type": "reversal",
+                    "points": -points_to_deduct,
+                    "offer_id": offer_id,
+                    "offer_name": offer_name,
+                    "status": "rejected",
+                    "created_at": datetime.now(timezone.utc)
+                }
+                await db.transactions.insert_one(transaction)
+            
+            logger.info(f"Admantium: Deducted {points_to_deduct} points from user {user_id} (rejected)")
+        
+        return PlainTextResponse("OK")
+        
+    except Exception as e:
+        logger.error(f"Admantium callback error: {e}")
+        return PlainTextResponse("ERROR")
+
+# ========================= SURVEY HISTORY & TRANSACTIONS =========================
+
+@api_router.get("/surveys/history")
 async def get_survey_history(user: dict = Depends(get_current_user)):
-    """Get user's completed surveys"""
-    completions = await db.survey_completions.find(
-        {"user_id": user["user_id"]}, {"_id": 0}
-    ).sort("completed_at", -1).to_list(100)
+    """Get user's completed surveys/transactions from all providers"""
+    transactions = await db.transactions.find(
+        {"user_id": user["user_id"], "reward_type": "credit"},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
     
-    for c in completions:
-        if isinstance(c.get("completed_at"), str):
-            c["completed_at"] = datetime.fromisoformat(c["completed_at"])
+    for t in transactions:
+        if isinstance(t.get("created_at"), str):
+            t["created_at"] = datetime.fromisoformat(t["created_at"])
     
-    return [SurveyCompletionResponse(**c) for c in completions]
+    return transactions
+
+@api_router.get("/transactions")
+async def get_all_transactions(user: dict = Depends(get_current_user)):
+    """Get all transactions including reversals"""
+    transactions = await db.transactions.find(
+        {"user_id": user["user_id"]},
+        {"_id": 0, "raw_data": 0}
+    ).sort("created_at", -1).to_list(200)
+    
+    for t in transactions:
+        if isinstance(t.get("created_at"), str):
+            t["created_at"] = datetime.fromisoformat(t["created_at"])
+    
+    return transactions
 
 # ========================= WALLET & WITHDRAWAL =========================
 
@@ -485,7 +810,6 @@ async def request_withdrawal(data: WithdrawalRequest, user: dict = Depends(get_c
     }
     await db.withdrawals.insert_one(withdrawal)
     
-    # Deduct from balance
     await db.users.update_one(
         {"user_id": user["user_id"]},
         {"$inc": {"balance": -data.amount}}
@@ -533,14 +857,14 @@ async def get_leaderboard():
 @api_router.get("/stats")
 async def get_user_stats(user: dict = Depends(get_current_user)):
     """Get user dashboard stats"""
-    # Get recent completions
-    recent = await db.survey_completions.find(
-        {"user_id": user["user_id"]}, {"_id": 0}
-    ).sort("completed_at", -1).limit(5).to_list(5)
+    recent = await db.transactions.find(
+        {"user_id": user["user_id"], "reward_type": "credit"},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(5).to_list(5)
     
     for r in recent:
-        if isinstance(r.get("completed_at"), str):
-            r["completed_at"] = datetime.fromisoformat(r["completed_at"])
+        if isinstance(r.get("created_at"), str):
+            r["created_at"] = datetime.fromisoformat(r["created_at"])
     
     return {
         "balance": user.get("balance", 0),
@@ -554,7 +878,7 @@ async def get_user_stats(user: dict = Depends(get_current_user)):
 
 @api_router.get("/")
 async def root():
-    return {"message": "Survey Portal API", "version": "1.0.0"}
+    return {"message": "Survey Portal API", "version": "2.0.0"}
 
 # Include router
 app.include_router(api_router)
