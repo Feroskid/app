@@ -8,28 +8,9 @@ const getAuthHeaders = () => {
 };
 
 export const api = {
-  // Surveys
-  getSurveys: async (provider = null, category = null) => {
-    const params = new URLSearchParams();
-    if (provider) params.append('provider', provider);
-    if (category) params.append('category', category);
-    const response = await axios.get(`${API}/surveys?${params}`, {
-      headers: getAuthHeaders(),
-      withCredentials: true
-    });
-    return response.data;
-  },
-
-  startSurvey: async (surveyId) => {
-    const response = await axios.post(`${API}/surveys/start`, { survey_id: surveyId }, {
-      headers: getAuthHeaders(),
-      withCredentials: true
-    });
-    return response.data;
-  },
-
-  completeSurvey: async (surveyId) => {
-    const response = await axios.post(`${API}/surveys/complete`, { survey_id: surveyId }, {
+  // Survey Providers
+  getSurveyProviders: async () => {
+    const response = await axios.get(`${API}/surveys/providers`, {
       headers: getAuthHeaders(),
       withCredentials: true
     });
@@ -38,6 +19,14 @@ export const api = {
 
   getSurveyHistory: async () => {
     const response = await axios.get(`${API}/surveys/history`, {
+      headers: getAuthHeaders(),
+      withCredentials: true
+    });
+    return response.data;
+  },
+
+  getTransactions: async () => {
+    const response = await axios.get(`${API}/transactions`, {
       headers: getAuthHeaders(),
       withCredentials: true
     });
