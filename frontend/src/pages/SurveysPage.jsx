@@ -1,91 +1,75 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Progress } from '../components/ui/progress';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 import {
-  Coins, Clock, BarChart3, Filter, Loader2, Play,
-  CheckCircle, ArrowRight
+  Coins, Clock, Loader2, ExternalLink, RefreshCw, Maximize2, X
 } from 'lucide-react';
 
 export default function SurveysPage() {
-  const { refreshUser } = useAuth();
-  const [surveys, setSurveys] = useState([]);
+  const { user, refreshUser } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
-  const [activeSurvey, setActiveSurvey] = useState(null);
-  const [surveyProgress, setSurveyProgress] = useState(0);
-  const [completing, setCompleting] = useState(false);
+  const [activeProvider, setActiveProvider] = useState(searchParams.get('provider') || 'all');
+  const [fullscreenProvider, setFullscreenProvider] = useState(null);
 
   useEffect(() => {
-    loadSurveys();
-  }, [filter]);
+    loadProviders();
+  }, []);
 
-  const loadSurveys = async () => {
+  useEffect(() => {
+    if (activeProvider !== 'all') {
+      setSearchParams({ provider: activeProvider });
+    } else {
+      setSearchParams({});
+    }
+  }, [activeProvider, setSearchParams]);
+
+  const loadProviders = async () => {
     try {
-      const provider = filter === 'all' ? null : filter;
-      const data = await api.getSurveys(provider);
-      setSurveys(data);
+      const data = await api.getSurveyProviders();
+      setProviders(data.providers);
     } catch (error) {
-      toast.error('Failed to load surveys');
+      toast.error('Failed to load survey providers');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleStartSurvey = async (survey) => {
-    try {
-      await api.startSurvey(survey.survey_id);
-      setActiveSurvey(survey);
-      setSurveyProgress(0);
-      
-      // Simulate survey progress
-      const interval = setInterval(() => {
-        setSurveyProgress((prev) => {
-          if (prev >= 100) {
-            clearInterval(interval);
-            return 100;
-          }
-          return prev + 10;
-        });
-      }, 500);
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to start survey');
-    }
+  const handleRefresh = async () => {
+    await refreshUser();
+    toast.success('Balance refreshed!');
   };
 
-  const handleCompleteSurvey = async () => {
-    if (!activeSurvey) return;
-    
-    setCompleting(true);
-    try {
-      const result = await api.completeSurvey(activeSurvey.survey_id);
-      toast.success(`Earned ${result.points_earned} points!`);
-      setActiveSurvey(null);
-      setSurveyProgress(0);
-      await refreshUser();
-      loadSurveys();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to complete survey');
-    } finally {
-      setCompleting(false);
-    }
+  const openFullscreen = (provider) => {
+    setFullscreenProvider(provider);
   };
 
-  const getDifficultyColor = (difficulty) => {
-    switch (difficulty) {
-      case 'Easy': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
-      case 'Medium': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
-      case 'Hard': return 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30';
-      default: return 'bg-slate-500/10 text-slate-600 dark:text-slate-400';
-    }
+  const closeFullscreen = () => {
+    setFullscreenProvider(null);
+    refreshUser();
   };
+
+  const openInNewTab = (url) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[60vh]">
+          <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -94,163 +78,240 @@ export default function SurveysPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white font-['Outfit']">
-              Available Surveys
+              Survey Walls
             </h1>
             <p className="text-slate-600 dark:text-slate-400 mt-1">
-              Complete surveys to earn points
+              Complete surveys and offers to earn points
             </p>
           </div>
           
-          <Tabs value={filter} onValueChange={setFilter}>
-            <TabsList className="grid w-full grid-cols-3 sm:w-auto">
-              <TabsTrigger value="all" data-testid="filter-all">All</TabsTrigger>
-              <TabsTrigger value="inbrain" data-testid="filter-inbrain">Inbrain</TabsTrigger>
-              <TabsTrigger value="cpx_research" data-testid="filter-cpx">CPX</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-
-        {/* Surveys Grid */}
-        {loading ? (
-          <div className="flex items-center justify-center h-[40vh]">
-            <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
-          </div>
-        ) : surveys.length === 0 ? (
-          <Card className="glass-card border-slate-200 dark:border-white/10">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                <BarChart3 className="w-8 h-8 text-slate-400" />
-              </div>
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-                No surveys available
-              </h3>
-              <p className="text-slate-500 dark:text-slate-400 text-center max-w-md">
-                All surveys have been completed or none are available at the moment. Check back later!
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {surveys.map((survey) => (
-              <Card
-                key={survey.survey_id}
-                className="glass-card border-slate-200 dark:border-white/10 hover:scale-[1.02] transition-transform duration-300"
-                data-testid={`survey-card-${survey.survey_id}`}
-              >
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <Badge
-                      variant="outline"
-                      className={`${
-                        survey.provider === 'inbrain'
-                          ? 'border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/5'
-                          : 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5'
-                      }`}
-                    >
-                      {survey.provider === 'inbrain' ? 'Inbrain' : 'CPX Research'}
-                    </Badge>
-                    <Badge variant="outline" className={getDifficultyColor(survey.difficulty)}>
-                      {survey.difficulty}
-                    </Badge>
-                  </div>
-
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white font-['Outfit'] mb-2">
-                    {survey.title}
-                  </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4 line-clamp-2">
-                    {survey.description}
-                  </p>
-
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="flex items-center gap-1.5">
-                      <Coins className="w-4 h-4 text-emerald-500" />
-                      <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                        {survey.points} pts
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                      <Clock className="w-4 h-4" />
-                      <span className="text-sm">{survey.estimated_time} min</span>
-                    </div>
-                  </div>
-
-                  <Badge variant="secondary" className="mb-4">
-                    {survey.category}
-                  </Badge>
-
-                  <Button
-                    className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-600"
-                    onClick={() => handleStartSurvey(survey)}
-                    disabled={survey.status === 'in_progress'}
-                    data-testid={`start-${survey.survey_id}`}
-                  >
-                    {survey.status === 'in_progress' ? (
-                      <>
-                        <Clock className="w-4 h-4 mr-2" />
-                        In Progress
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4 mr-2" />
-                        Start Survey
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Survey Dialog */}
-      <Dialog open={!!activeSurvey} onOpenChange={() => setActiveSurvey(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-['Outfit']">{activeSurvey?.title}</DialogTitle>
-            <DialogDescription>
-              Complete this survey to earn {activeSurvey?.points} points
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="text-center">
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-                {activeSurvey?.description}
-              </p>
-              <p className="text-sm text-slate-600 dark:text-slate-300 mb-2">
-                Survey Progress (Simulated)
-              </p>
-              <Progress value={surveyProgress} className="h-3" />
-              <p className="text-sm text-slate-500 mt-2">{surveyProgress}% Complete</p>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+              <Coins className="w-4 h-4 text-emerald-500" />
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                {user?.balance?.toLocaleString() || 0} pts
+              </span>
             </div>
-          </div>
-
-          <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setActiveSurvey(null)}
+              size="icon"
+              onClick={handleRefresh}
+              className="rounded-full"
+              data-testid="refresh-balance-btn"
             >
-              Cancel
+              <RefreshCw className="w-4 h-4" />
             </Button>
-            <Button
-              onClick={handleCompleteSurvey}
-              disabled={surveyProgress < 100 || completing}
-              className="bg-emerald-500 hover:bg-emerald-600"
-              data-testid="complete-survey-btn"
-            >
-              {completing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Complete & Earn {activeSurvey?.points} pts
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </div>
+        </div>
+
+        {/* Provider Tabs */}
+        <Tabs value={activeProvider} onValueChange={setActiveProvider}>
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="all" data-testid="tab-all">All Providers</TabsTrigger>
+            {providers.map((p) => (
+              <TabsTrigger key={p.id} value={p.id} data-testid={`tab-${p.id}`}>
+                {p.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+
+          {/* All Providers View */}
+          <TabsContent value="all" className="mt-6">
+            <div className="grid md:grid-cols-3 gap-6">
+              {providers.map((provider) => (
+                <Card 
+                  key={provider.id}
+                  className="glass-card border-slate-200 dark:border-white/10 hover:scale-[1.02] transition-transform"
+                  data-testid={`provider-card-${provider.id}`}
+                >
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div 
+                        className="w-12 h-12 rounded-xl flex items-center justify-center"
+                        style={{ backgroundColor: `${provider.color}20` }}
+                      >
+                        <span 
+                          className="text-xl font-bold"
+                          style={{ color: provider.color }}
+                        >
+                          {provider.name.charAt(0)}
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-slate-900 dark:text-white font-['Outfit']">
+                          {provider.name}
+                        </h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                          {provider.description}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 rounded-xl"
+                        style={{ backgroundColor: provider.color }}
+                        onClick={() => setActiveProvider(provider.id)}
+                        data-testid={`open-${provider.id}`}
+                      >
+                        Open Wall
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="rounded-xl"
+                        onClick={() => openInNewTab(provider.iframe_url)}
+                        data-testid={`external-${provider.id}`}
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Info Card */}
+            <Card className="glass-card border-slate-200 dark:border-white/10 mt-6">
+              <CardContent className="p-6">
+                <h3 className="font-semibold text-slate-900 dark:text-white font-['Outfit'] mb-2">
+                  How it works
+                </h3>
+                <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-400">
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-500 font-bold">1.</span>
+                    Choose a survey provider above to view available surveys
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-500 font-bold">2.</span>
+                    Complete surveys honestly and accurately
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-500 font-bold">3.</span>
+                    Points are credited automatically to your balance
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-emerald-500 font-bold">4.</span>
+                    Withdraw your earnings once you reach 500 points
+                  </li>
+                </ul>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Individual Provider Views */}
+          {providers.map((provider) => (
+            <TabsContent key={provider.id} value={provider.id} className="mt-6">
+              <Card className="glass-card border-slate-200 dark:border-white/10">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div 
+                        className="w-10 h-10 rounded-xl flex items-center justify-center"
+                        style={{ backgroundColor: `${provider.color}20` }}
+                      >
+                        <span 
+                          className="text-lg font-bold"
+                          style={{ color: provider.color }}
+                        >
+                          {provider.name.charAt(0)}
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-slate-900 dark:text-white">
+                          {provider.name}
+                        </h3>
+                        <p className="text-xs text-slate-500">{provider.description}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openFullscreen(provider)}
+                        className="rounded-lg"
+                      >
+                        <Maximize2 className="w-4 h-4 mr-2" />
+                        Fullscreen
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openInNewTab(provider.iframe_url)}
+                        className="rounded-lg"
+                      >
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        New Tab
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  {/* Iframe Container */}
+                  <div className="relative bg-white dark:bg-slate-800 rounded-xl overflow-hidden border border-slate-200 dark:border-white/10">
+                    <iframe
+                      src={provider.iframe_url}
+                      className="w-full border-0"
+                      style={{ height: '700px' }}
+                      title={`${provider.name} Survey Wall`}
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+                      data-testid={`iframe-${provider.id}`}
+                    />
+                  </div>
+                  
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-3 text-center">
+                    Complete surveys above to earn points. Your balance updates automatically.
+                  </p>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          ))}
+        </Tabs>
+      </div>
+
+      {/* Fullscreen Modal */}
+      {fullscreenProvider && (
+        <div className="fixed inset-0 z-50 bg-slate-950">
+          <div className="flex items-center justify-between p-4 bg-slate-900 border-b border-white/10">
+            <div className="flex items-center gap-3">
+              <div 
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ backgroundColor: `${fullscreenProvider.color}20` }}
+              >
+                <span 
+                  className="text-sm font-bold"
+                  style={{ color: fullscreenProvider.color }}
+                >
+                  {fullscreenProvider.name.charAt(0)}
+                </span>
+              </div>
+              <span className="font-semibold text-white">{fullscreenProvider.name}</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10">
+                <Coins className="w-4 h-4 text-emerald-400" />
+                <span className="text-sm font-semibold text-emerald-400">
+                  {user?.balance?.toLocaleString() || 0} pts
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={closeFullscreen}
+                className="text-white hover:bg-white/10 rounded-full"
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+          <iframe
+            src={fullscreenProvider.iframe_url}
+            className="w-full border-0"
+            style={{ height: 'calc(100vh - 64px)' }}
+            title={`${fullscreenProvider.name} Survey Wall`}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+          />
+        </div>
+      )}
     </DashboardLayout>
   );
 }
